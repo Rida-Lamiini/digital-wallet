@@ -34,8 +34,17 @@ fi
 docker pull rida999/e-wallet-backend:latest
 docker pull rida999/e-wallet-frontend:latest
 
+# Stop and remove existing containers if they exist
+docker-compose -f docker-compose.deploy.yml down --remove-orphans
+
+# Clean up any dangling containers with the same names
+docker rm -f e-wallet-nginx e-wallet-frontend e-wallet-backend e-wallet-db 2>/dev/null || true
+
 # Run the deployment
 docker-compose -f docker-compose.deploy.yml up -d
+
+# Wait a moment for services to start
+sleep 10
 
 # Check if services are running
 docker-compose -f docker-compose.deploy.yml ps
@@ -48,3 +57,7 @@ echo ""
 echo "Note: If you see the Nginx welcome page instead of the React app,"
 echo "the frontend container might still be starting. Wait a few minutes and refresh."
 echo "You can check the frontend logs with: docker-compose -f docker-compose.deploy.yml logs frontend"
+echo ""
+echo "To check all service logs: docker-compose -f docker-compose.deploy.yml logs"
+echo "To restart services: docker-compose -f docker-compose.deploy.yml restart"
+echo "To stop services: docker-compose -f docker-compose.deploy.yml down"
