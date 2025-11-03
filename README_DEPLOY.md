@@ -1,12 +1,6 @@
-# E-Wallet Deployment Guide
+# E-Wallet AWS EC2 Deployment Guide
 
-This guide explains how to deploy the E-Wallet application to an AWS EC2 instance using Docker and Docker Compose.
-
-## Prerequisites
-
-- AWS EC2 instance with Ubuntu/Debian-based OS
-- Docker and Docker Compose installed on the EC2 instance
-- SSH access to the EC2 instance
+This guide provides a complete production-ready deployment of the E-Wallet application on AWS EC2.
 
 ## Instance Details
 
@@ -16,123 +10,256 @@ This guide explains how to deploy the E-Wallet application to an AWS EC2 instanc
 - **Region**: eu-north-1
 - **Instance Type**: m7i-flex.large
 
-## Deployment Steps
+## Quick Deployment (Automated)
 
-### 1. Connect to EC2 Instance
+### 1. Initial EC2 Setup
 
 ```bash
+# Connect to your EC2 instance
 ssh -i your-key.pem ubuntu@ec2-16-170-214-112.eu-north-1.compute.amazonaws.com
+
+# Run the AWS setup script
+wget https://raw.githubusercontent.com/rida999/digital-wallet/main/aws-setup.sh
+chmod +x aws-setup.sh
+sudo ./aws-setup.sh
 ```
 
-### 2. Clone the Repository
+### 2. Deploy Application
 
 ```bash
-git clone https://github.com/rida999/digital-wallet.git
-cd digital-wallet
-```
+# Clone repository
+cd /opt/e-wallet
+git clone https://github.com/rida999/digital-wallet.git .
+# OR copy files manually
 
-### 3. Set Up Environment Variables
-
-Create a `.env` file with your database and JWT configuration:
-
-```bash
-cp .env.example .env
-# Edit .env with your actual values
+# Create environment file
 nano .env
-```
+# Add your environment variables:
+# db_name=ewallet
+# db_username=ewallet_user
+# db_password=your_secure_password
+# jwt_secret=your_jwt_secret_key
 
-Required environment variables:
-
-- `db_name`: Database name
-- `db_username`: Database username
-- `db_password`: Database password
-- `jwt_secret`: JWT secret key
-
-### 4. Run the Deployment Script
-
-```bash
-chmod +x deploy.sh
+# Run deployment
 ./deploy.sh
 ```
 
-This script will:
+## Manual Deployment Steps
 
-- Update system packages
-- Install Docker and Docker Compose (if not present)
-- Pull the latest images from Docker Hub
-- Start all services using Docker Compose
+### Prerequisites
 
-### 5. Verify Deployment
+- Ubuntu/Debian-based EC2 instance
+- SSH access with key pair
+- Security group allowing ports 22, 80, 443
 
-Check if all services are running:
+### 1. System Preparation
 
 ```bash
+# Update system
+sudo apt update && sudo apt upgrade -y
+
+# Install Docker
+curl -fsSL https://get.docker.com -o get-docker.sh
+sudo sh get-docker.sh
+sudo usermod -aG docker $USER
+
+# Install Docker Compose
+sudo curl -L "https://github.com/docker/compose/releases/download/v2.24.0/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+sudo chmod +x /usr/local/bin/docker-compose
+
+# Install monitoring tools
+sudo apt install -y htop iotop ncdu fail2ban lsof
+
+# Configure firewall
+sudo ufw --force enable
+sudo ufw allow ssh
+sudo ufw allow 80
+sudo ufw allow 443
+```
+
+### 2. Application Setup
+
+```bash
+# Create application directory
+sudo mkdir -p /opt/e-wallet
+sudo chown -R $USER:$USER /opt/e-wallet
+cd /opt/e-wallet
+
+# Clone or copy application files
+git clone https://github.com/rida999/digital-wallet.git .
+
+# Create environment configuration
+cp .env.example .env
+nano .env
+```
+
+### 3. Environment Configuration
+
+Create `.env` file with:
+
+```env
+# Database Configuration
+db_name=ewallet
+db_username=ewallet_user
+db_password=your_secure_password_here
+
+# JWT Configuration
+jwt_secret=your_jwt_secret_key_here
+```
+
+### 4. Deploy Application
+
+```bash
+# Make scripts executable
+chmod +x deploy.sh aws-setup.sh
+
+# Run deployment
+./deploy.sh
+```
+
+## Architecture Overview
+
+```
+Internet → Nginx (Port 80/443) → Frontend (React)
+                              → Backend API (Spring Boot)
+                              → Database (PostgreSQL)
+```
+
+### Services
+
+- **Nginx**: Reverse proxy, SSL termination, static file serving
+- **Frontend**: React SPA served through Nginx
+- **Backend**: Spring Boot REST API
+- **Database**: PostgreSQL with persistent storage
+
+## SSL Configuration (Production)
+
+```bash
+# Install Certbot
+sudo apt install -y certbot python3-certbot-nginx
+
+# Get SSL certificate (replace with your domain)
+sudo certbot --nginx -d your-domain.com
+
+# Test renewal
+sudo certbot renew --dry-run
+```
+
+## Monitoring & Maintenance
+
+### Health Checks
+
+```bash
+# Check service status
 docker-compose -f docker-compose.deploy.yml ps
+
+# View logs
+docker-compose -f docker-compose.deploy.yml logs -f
+
+# Monitor resources
+docker stats
+htop
 ```
 
-Check logs:
+### Backup & Recovery
 
 ```bash
-docker-compose -f docker-compose.deploy.yml logs
+# Manual backup
+/opt/e-wallet/backup.sh
+
+# View backup files
+ls -la /opt/e-wallet/backups/
 ```
 
-## Access the Application
+### Updates
 
-- **Main Application**: http://ec2-16-170-214-112.eu-north-1.compute.amazonaws.com
-- **Frontend**: http://ec2-16-170-214-112.eu-north-1.compute.amazonaws.com
-- **Backend API**: http://ec2-16-170-214-112.eu-north-1.compute.amazonaws.com/api/
+```bash
+# Update application
+cd /opt/e-wallet
+git pull
+docker-compose -f docker-compose.deploy.yml pull
+docker-compose -f docker-compose.deploy.yml up -d
 
-## Architecture
+# Update system
+sudo apt update && sudo apt upgrade -y
+```
 
-The deployment uses the following services:
+## Security Best Practices
 
-- **Nginx**: Reverse proxy and load balancer (port 80)
-- **Frontend**: React application (served through Nginx)
-- **Backend**: Spring Boot API (internal port 8080)
-- **Database**: PostgreSQL (internal port 5432)
+### AWS Security Groups
+
+- **Inbound Rules**:
+  - SSH (22) - Your IP only
+  - HTTP (80) - 0.0.0.0/0
+  - HTTPS (443) - 0.0.0.0/0
+
+### Instance Security
+
+```bash
+# Disable password authentication
+sudo sed -i 's/#PasswordAuthentication yes/PasswordAuthentication no/' /etc/ssh/sshd_config
+sudo systemctl restart ssh
+
+# Set up fail2ban
+sudo systemctl enable fail2ban
+sudo systemctl start fail2ban
+```
+
+### Application Security
+
+- Use strong passwords for database
+- Keep JWT secrets secure
+- Regularly update Docker images
+- Monitor logs for suspicious activity
 
 ## Troubleshooting
 
-### Check Service Status
+### Common Issues
+
+1. **Port 80 already in use**
+
+   ```bash
+   sudo lsof -i :80
+   sudo fuser -k 80/tcp
+   ```
+
+2. **Container fails to start**
+
+   ```bash
+   docker-compose -f docker-compose.deploy.yml logs <service_name>
+   ```
+
+3. **Database connection issues**
+
+   ```bash
+   docker-compose -f docker-compose.deploy.yml exec db psql -U $db_username -d $db_name
+   ```
+
+4. **Frontend not loading**
+   ```bash
+   docker-compose -f docker-compose.deploy.yml logs frontend
+   # Check if React app started properly
+   ```
+
+### Performance Tuning
 
 ```bash
-docker-compose -f docker-compose.deploy.yml ps
+# Adjust Docker resource limits in docker-compose.deploy.yml
+# Increase memory limits if needed
+# Configure swap space for better performance
 ```
 
-### View Logs
+## Access URLs
 
-```bash
-# All services
-docker-compose -f docker-compose.deploy.yml logs
+- **Application**: http://ec2-16-170-214-112.eu-north-1.compute.amazonaws.com
+- **API**: http://ec2-16-170-214-112.eu-north-1.compute.amazonaws.com/api/
+- **Health Check**: http://ec2-16-170-214-112.eu-north-1.compute.amazonaws.com/api/health
 
-# Specific service
-docker-compose -f docker-compose.deploy.yml logs backend
-docker-compose -f docker-compose.deploy.yml logs frontend
-docker-compose -f docker-compose.deploy.yml logs db
-```
+## Support
 
-### Restart Services
+For issues or questions:
 
-```bash
-docker-compose -f docker-compose.deploy.yml restart
-```
-
-### Update Images
-
-```bash
-docker-compose -f docker-compose.deploy.yml pull
-docker-compose -f docker-compose.deploy.yml up -d
-```
-
-## Security Considerations
-
-- Ensure your EC2 instance has proper security groups configured
-- Use HTTPS in production (consider AWS Certificate Manager and ALB)
-- Regularly update Docker images
-- Monitor logs for security issues
-
-## Monitoring
-
-- Use `docker stats` to monitor container resource usage
-- Check application logs regularly
-- Set up CloudWatch alarms for EC2 metrics
+1. Check logs: `docker-compose -f docker-compose.deploy.yml logs`
+2. Verify environment variables in `.env`
+3. Ensure all required ports are open in security groups
+4. Check system resources: `df -h` and `free -h`
